@@ -19,7 +19,7 @@ use crate::*;
 use frame_support::traits::GenesisBuild;
 use frame_support::traits::Get;
 use frame_support::{
-	impl_outer_event, impl_outer_origin, parameter_types,
+	impl_outer_dispatch, impl_outer_event, impl_outer_origin, parameter_types,
 	traits::{OnFinalize, OnInitialize},
 	weights::Weight,
 };
@@ -59,6 +59,25 @@ impl_outer_event! {
 		frame_system<T>,
 		pallet_balances<T>,
 		crowdloan_rewards<T>,
+		pallet_utility,
+	}
+}
+
+impl_outer_dispatch! {
+	pub enum Call for Test where origin: Origin {
+		frame_system::Sys,
+		pallet_balances::Balances,
+		pallet_utility::Utility,
+		crowdloan_rewards::Crowdloan,
+	}
+}
+
+impl frame_support::traits::PalletInfo for Test {
+	fn index<P: 'static>() -> Option<usize> {
+		return Some(0);
+	}
+	fn name<P: 'static>() -> Option<&'static str> {
+		return Some("System");
 	}
 }
 
@@ -78,7 +97,7 @@ impl frame_system::Config for Test {
 	type Origin = Origin;
 	type Index = u64;
 	type BlockNumber = BlockNumber;
-	type Call = ();
+	type Call = Call;
 	type Hash = H256;
 	type Hashing = BlakeTwo256;
 	type AccountId = AccountId;
@@ -87,7 +106,7 @@ impl frame_system::Config for Test {
 	type Event = MetaEvent;
 	type BlockHashCount = BlockHashCount;
 	type Version = ();
-	type PalletInfo = ();
+	type PalletInfo = Self;
 	type AccountData = pallet_balances::AccountData<Balance>;
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
@@ -106,18 +125,26 @@ impl pallet_balances::Config for Test {
 	type Event = MetaEvent;
 	type DustRemoval = ();
 	type ExistentialDeposit = ExistentialDeposit;
-	type AccountStore = frame_system::Module<Test>;
+	type AccountStore = frame_system::Pallet<Test>;
 	type WeightInfo = ();
 }
 impl Config for Test {
 	type Event = MetaEvent;
+	type Call = Call;
 	type RewardCurrency = Balances;
 	type RelayChainAccountId = [u8; 32];
 	type VestingPeriod = TestVestingPeriod;
 }
-pub type Balances = pallet_balances::Module<Test>;
-pub type Crowdloan = Module<Test>;
-pub type Sys = frame_system::Module<Test>;
+impl pallet_utility::Config for Test {
+	type Event = MetaEvent;
+	type Call = Call;
+	type WeightInfo = ();
+}
+
+pub type Balances = pallet_balances::Pallet<Test>;
+pub type Crowdloan = Pallet<Test>;
+pub type Sys = frame_system::Pallet<Test>;
+pub type Utility = pallet_utility::Pallet<Test>;
 
 fn genesis(
 	assigned: Vec<([u8; 32], AccountId, u32)>,
