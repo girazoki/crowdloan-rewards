@@ -1,0 +1,42 @@
+name: CI
+
+# Using a single file workflow is the preferred solution for our CI over workflow_runs.
+# 1. It generates only 1 action item in the list making it more readable
+# 2. It includes the PR/Commit text in the action item
+# 3. Artifacts are not available between workflows.
+
+  # This is only allowing pushes on the moonbeam repo or pull request.
+# In the case of pull request, the CI executes the workflow from
+# the commit the **PR is merging into**. This prevents malicious attack trying
+# to change the CI in the PR.
+####### DO NOT CHANGE THIS !! #######
+on: ["push"]
+
+jobs:
+
+  ####### Building and Testing binaries #######
+
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_SCCACHE_VERSION: 0.2.14-alpha.0-parity
+    steps:
+      - uses: actions/checkout@v1
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          components: rustfmt, clippy
+
+      - name: Formatter
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all --verbose
