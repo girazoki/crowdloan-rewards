@@ -171,40 +171,45 @@ pub mod pallet {
 		/// Weight argument is 0 since it depends on how the storage trie is composed
 		/// Once we have the number of contributors, we can probably add such a weight here
 		#[pallet::weight(T::WeightInfo::associate_native_identity())]
-		pub fn associate_native_identity(
+		pub fn associate_unassociated_relay_identity(
 			origin: OriginFor<T>,
 			reward_account: T::AccountId,
 			relay_account_proofs: Vec<(T::RelayChainAccountId, MultiSignature)>,
 		) -> DispatchResultWithPostInfo {
 			ensure_signed(origin)?;
 
-			// Check the proof:
-			// 1. Is signed by an actual unassociated contributor
+			// Check the proofs:
+			// 1.1 If the relay address is unassociated, check that it exists in the Unassociated storage
+			// 1.2 If the relay address is/are associated, make sure that they have the same native key associated
 			// 2. Signs a valid native identity
-			// Check the proof. The Proof consists of a Signature of the rewarded account with the
+			// Check the proofs. The Proofs consist of a Signature of the rewarded account with the
 			// claimer key
 
-
 			// Makes sure the vec is not empty
-			let (first_relay_account , _) = relay_account_proofs.first().ok_or(Error::<T>::NonMatchingProofOrAccountNumber)?;
+			let (first_relay_account, _) = relay_account_proofs
+				.first()
+				.ok_or(Error::<T>::NonMatchingProofOrAccountNumber)?;
 			let native_account = ClaimedRelayChainIds::<T>::get(first_relay_account);
 			let payload = reward_account.encode();
 
 			// We can start iterating from 1
+			// Verify all proofs
+			// 
 			for (i, (relay_account, relay_proof)) in relay_account_proofs.iter().enumerate() {
-				if i!=0 {
+				if i != 0 {
 					let associated_account = ClaimedRelayChainIds::<T>::get(relay_account);
 					ensure!(
 						associated_account == native_account,
 						Error::<T>::NonMatchingAssociatedAccountsForRelayAccounts,
 					);
-				} 
+				}
 				ensure!(
 					relay_proof.verify(payload.as_slice(), &relay_account.clone().into()),
 					Error::<T>::InvalidClaimSignature
 				);
 			}
 
+			// Now we should update the reward information
 			let mut reward_info =
 				// If an association exists, we just need to insert it in the new reward address
 				if let Some(associated) = native_account {
@@ -217,6 +222,10 @@ pub mod pallet {
 				}
 				// Else, we just need to associate it and pay rewards
 				else {
+
+					// For now we only support to associate one at a time if not associated already
+					ensure!(relay_account_proofs.len() == 1, Error::<T>::OnlyOneUnassociatedIsSupported);
+
 					// Upon error this should check the relay chain state in this case
 					let mut reward_info = UnassociatedContributions::<T>::get(&first_relay_account)
 						.ok_or(Error::<T>::NoAssociatedClaim)?;
@@ -251,25 +260,28 @@ pub mod pallet {
 				reward_info.claimed_reward = reward_info
 					.claimed_reward
 					.saturating_add(info_existing_account.claimed_reward);
-				let amount = AssociatedRelayAddresses::<T>::get(&reward_account).ok_or(Error::<T>::NoAssociatedClaim)?;
-				AssociatedRelayAddresses::<T>::insert(&reward_account,amount.saturating_add(1));
-			}
-			else {
-				AssociatedRelayAddresses::<T>::insert(&reward_account,1);
+				let amount = AssociatedRelayAddresses::<T>::get(&reward_account)
+					.ok_or(Error::<T>::NoAssociatedClaim)?;
+				AssociatedRelayAddresses::<T>::insert(&reward_account, amount.saturating_add(1));
+			} else {
+				AssociatedRelayAddresses::<T>::insert(&reward_account, 1);
 			}
 
 			// Insert on payable
 			AccountsPayable::<T>::insert(&reward_account, &reward_info);
 
-			
-			for (relay_account, _) in relay_account_proofs.iter() {
-				// Insert in mapping
-				ClaimedRelayChainIds::<T>::insert(&relay_account, &reward_account);
-			}
-
+			let relay_accounts_changed: Vec<T::RelayChainAccountId> = relay_account_proofs
+				.iter()
+				.map(|(relay_account, _)| {
+					// Insert in mapping
+					ClaimedRelayChainIds::<T>::insert(&relay_account, &reward_account);
+					relay_account.clone()
+				})
+				.collect();
 
 			// Emit Event
 			Self::deposit_event(Event::NativeIdentityAssociated(
+				relay_accounts_changed,
 				reward_account.clone(),
 				reward_info.total_reward,
 			));
@@ -530,8 +542,12 @@ pub mod pallet {
 				if let Some(native_account) = native_account {
 					if let Some(inserted_reward_info) = AccountsPayable::<T>::get(native_account) {
 						// the native account has already some rewards in, we add the new ones
-						let amount = AssociatedRelayAddresses::<T>::get(native_account).ok_or(Error::<T>::NoAssociatedClaim)?;
-						AssociatedRelayAddresses::<T>::insert(native_account,amount.saturating_add(1));
+						let amount = AssociatedRelayAddresses::<T>::get(native_account)
+							.ok_or(Error::<T>::NoAssociatedClaim)?;
+						AssociatedRelayAddresses::<T>::insert(
+							native_account,
+							amount.saturating_add(1),
+						);
 
 						AccountsPayable::<T>::insert(
 							native_account,
@@ -608,6 +624,8 @@ pub mod pallet {
 		ProofNeedsToBeProvided,
 		/// Provided a proof for different reward accounts
 		NonMatchingAssociatedAccountsForRelayAccounts,
+		/// Only support one unassociated for now
+		OnlyOneUnassociatedIsSupported,
 	}
 
 	#[pallet::genesis_config]
@@ -682,7 +700,7 @@ pub mod pallet {
 		InitialPaymentMade(T::AccountId, BalanceOf<T>),
 		/// Someone has proven they made a contribution and associated a native identity with it.
 		/// Data is the relay account,  native account and the total amount of _rewards_ that will be paid
-		NativeIdentityAssociated(T::AccountId, BalanceOf<T>),
+		NativeIdentityAssociated(Vec<T::RelayChainAccountId>, T::AccountId, BalanceOf<T>),
 		/// A contributor has claimed some rewards.
 		/// Data is the account getting paid and the amount of rewards paid.
 		RewardsPaid(T::AccountId, BalanceOf<T>),

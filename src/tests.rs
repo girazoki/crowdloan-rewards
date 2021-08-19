@@ -362,9 +362,7 @@ fn paying_late_joiner_works() {
 		assert_ok!(Crowdloan::associate_native_identity(
 			Origin::signed(4),
 			3,
-			vec![(
-			pairs[0].public().into(),
-			signature.clone())]
+			vec![(pairs[0].public().into(), signature.clone())]
 		));
 		assert_ok!(Crowdloan::claim(Origin::signed(3)));
 		assert_eq!(Crowdloan::accounts_payable(&3).unwrap().claimed_reward, 500);
